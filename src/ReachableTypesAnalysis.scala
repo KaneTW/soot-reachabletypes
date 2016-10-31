@@ -1,6 +1,8 @@
+
 import java.util
-import java.util._
-import java.util.function.{BiConsumer, BiFunction, Consumer}
+
+import collection.{mutable => m}
+import collection.JavaConverters._
 
 import soot.jimple._
 import soot.options.Options
@@ -9,10 +11,10 @@ import soot.toolkits.graph.{DirectedGraph, ExceptionalUnitGraph}
 import soot.toolkits.scalar.ForwardFlowAnalysis
 
 // refactor into trait later
-class ReachableTypesAnalysis(g: DirectedGraph[SUnit]) extends ForwardFlowAnalysis[SUnit, Map[Value, Set[SType]]](g) {
+class ReachableTypesAnalysis(g: DirectedGraph[SUnit]) extends ForwardFlowAnalysis[SUnit, m.Map[Value, m.Set[SType]]](g) {
   doAnalysis()
 
-  override def flowThrough(before: Map[Value, Set[SType]], n: SUnit, after: Map[Value, Set[SType]]): Unit = {
+  override def flowThrough(before: m.Map[Value, m.Set[SType]], n: SUnit, after: m.Map[Value, m.Set[SType]]): Unit = {
     val pta = Scene.v().getPointsToAnalysis
     copy(before, after)
 
@@ -29,21 +31,21 @@ class ReachableTypesAnalysis(g: DirectedGraph[SUnit]) extends ForwardFlowAnalysi
         throw new RuntimeException("Unknown left operator " + left.getType)
     }
 
-    def possibleTypesOf(v: Value): Set[SType] = v match {
+    def possibleTypesOf(v: Value): m.Set[SType] = v match {
       case v: Local =>
-        before.getOrDefault(v, pta.reachingObjects(v).possibleTypes())
+        before.getOrElse(v, pta.reachingObjects(v).possibleTypes().asScala)
       case v: StaticFieldRef =>
-        before.getOrDefault(v, pta.reachingObjects(v.getField).possibleTypes())
+        before.getOrElse(v, pta.reachingObjects(v.getField).possibleTypes().asScala)
       case v: InstanceFieldRef =>
         v.getBase match {
           case base: Local =>
-            before.getOrDefault(base, pta.reachingObjects(base, v.getField).possibleTypes())
+            before.getOrElse(base, pta.reachingObjects(base, v.getField).possibleTypes().asScala)
           case _ => throw new RuntimeException("Expected Local base for InstanceFieldRef")
         }
       case v: ArrayRef =>
         possibleTypesOf(v.getBase)
 
-      case _ => new HashSet[SType](Collections.singleton(v.getType))
+      case _ => m.HashSet(v.getType)
     }
 
     n match {
@@ -54,38 +56,25 @@ class ReachableTypesAnalysis(g: DirectedGraph[SUnit]) extends ForwardFlowAnalysi
 
         val rightTypes = possibleTypesOf(right)
 
-        after.merge(base, rightTypes,
-          new BiFunction[Set[SType], Set[SType], Set[SType]] {
-            override def apply(t: util.Set[SType], u: util.Set[SType]) = {
-              t.addAll(u)
-              t
-            }
-          })
+        val old = after.getOrElse(base, m.Set())
+        after.put(base, old ++ rightTypes)
 
       case _ =>
     }
   }
 
-  override def merge(in1: Map[Value, Set[SType]], in2: Map[Value, Set[SType]], out: Map[Value, Set[SType]]): Unit = {
-    out.putAll(in1)
-    in2.forEach(new BiConsumer[Value, Set[SType]] {
-      override def accept(t: Value, u: util.Set[SType]) = {
-        out.merge(t, u, new BiFunction[Set[SType], Set[SType], Set[SType]] {
-          override def apply(s1: util.Set[SType], s2: util.Set[SType]) = {
-            val s3 = new util.HashSet[SType]()
-            s3.addAll(s1)
-            s3.addAll(s2)
-            s3
-          }
-        })
-      }
-    })
+  override def merge(in1: m.Map[Value, m.Set[SType]], in2: m.Map[Value, m.Set[SType]], out: m.Map[Value, m.Set[SType]]): Unit = {
+    out ++= in1
+    in2.foreach { case (k, v) =>
+      val old = out.getOrElse(k, m.Set())
+      out(k) = v ++ old
+    }
   }
 
-  override def newInitialFlow(): Map[Value, Set[SType]] = new HashMap()
+  override def newInitialFlow(): m.Map[Value, m.Set[SType]] = m.Map()
 
-  override def copy(in: Map[Value, Set[SType]], out: Map[Value, Set[SType]]): Unit = {
-    out.putAll(in)
+  override def copy(in: m.Map[Value, m.Set[SType]], out: m.Map[Value, m.Set[SType]]): Unit = {
+    out ++= in
   }
 
 }
@@ -98,7 +87,7 @@ object ReachableTypesExtension {
     val jtpPack = PackManager.v().getPack("jtp")
     jtpPack.add(
       new Transform("jtp.reachableTypesTransform", new BodyTransformer() {
-        def internalTransform(body: Body, phase: String, options: Map[String, String]): Unit = {
+        def internalTransform(body: Body, phase: String, options: util.Map[String, String]): Unit = {
           val ana = new ReachableTypesAnalysis(new ExceptionalUnitGraph(body))
           System.out.println(body)
           System.out.println(ana.getFlowAfter(body.getUnits.getLast))
