@@ -1,14 +1,14 @@
 
 import java.util
 
-import collection.{mutable => m}
-import collection.JavaConverters._
-
 import soot.jimple._
 import soot.options.Options
-import soot.{Body, BodyTransformer, Local, PackManager, PointsToSet, Scene, Transform, Value, Type => SType, Unit => SUnit}
 import soot.toolkits.graph.{DirectedGraph, ExceptionalUnitGraph}
 import soot.toolkits.scalar.ForwardFlowAnalysis
+import soot.{Body, BodyTransformer, Local, PackManager, Scene, Transform, Value, Type => SType, Unit => SUnit}
+
+import scala.collection.JavaConverters._
+import scala.collection.{mutable => m}
 
 // refactor into trait later
 class ReachableTypesAnalysis(g: DirectedGraph[SUnit]) extends ForwardFlowAnalysis[SUnit, m.Map[Value, m.Set[SType]]](g) {
