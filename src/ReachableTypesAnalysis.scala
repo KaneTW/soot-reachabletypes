@@ -10,6 +10,9 @@ import soot.{Body, BodyTransformer, Local, PackManager, Scene, Transform, Value,
 import scala.collection.JavaConverters._
 import scala.collection.{mutable => m}
 
+
+
+
 // refactor into trait later
 class ReachableTypesAnalysis(g: DirectedGraph[SUnit]) extends ForwardFlowAnalysis[SUnit, m.Map[Value, m.Set[SType]]](g) {
   doAnalysis()
@@ -18,18 +21,6 @@ class ReachableTypesAnalysis(g: DirectedGraph[SUnit]) extends ForwardFlowAnalysi
     val pta = Scene.v().getPointsToAnalysis
     copy(before, after)
 
-    def leftBase(left: Value): Value = left match {
-      case left: ArrayRef => // xs[n] => xs
-        leftBase(left.getBase)
-      case left: InstanceFieldRef => // xs.foo => xs
-        leftBase(left.getBase)
-      case left: StaticFieldRef => // Class.foo
-        left
-      case left: Local => // xs
-        left
-      case _ =>
-        throw new RuntimeException("Unknown left operator " + left.getType)
-    }
 
     def possibleTypesOf(v: Value): m.Set[SType] = v match {
       case v: Local =>
@@ -39,7 +30,7 @@ class ReachableTypesAnalysis(g: DirectedGraph[SUnit]) extends ForwardFlowAnalysi
       case v: InstanceFieldRef =>
         v.getBase match {
           case base: Local =>
-            before.getOrElse(base, pta.reachingObjects(base, v.getField).possibleTypes().asScala)
+            before.getOrElse(v, pta.reachingObjects(base, v.getField).possibleTypes().asScala)
           case _ => throw new RuntimeException("Expected Local base for InstanceFieldRef")
         }
       case v: ArrayRef =>
@@ -52,12 +43,11 @@ class ReachableTypesAnalysis(g: DirectedGraph[SUnit]) extends ForwardFlowAnalysi
       case n: DefinitionStmt =>
         val left = n.getLeftOp
         val right = n.getRightOp
-        val base = leftBase(left)
 
         val rightTypes = possibleTypesOf(right)
 
-        val old = after.getOrElse(base, m.Set())
-        after.put(base, old ++ rightTypes)
+        val old = after.getOrElse(left, m.Set())
+        after.put(left, old ++ rightTypes)
 
       case _ =>
     }
