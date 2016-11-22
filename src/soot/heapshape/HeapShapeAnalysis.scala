@@ -1,7 +1,8 @@
 package soot.heapshape
 
-import scala.collection.{immutable => im}
+import soot.Value
 
+// Value should be replaced with a stronger refined type
 trait HeapShapeAnalysis {
-  def getPredecessors(ref: Reference) : im.Set[Reference]
+  def getPredecessors(ref: Value) : collection.Set[Value]
 }

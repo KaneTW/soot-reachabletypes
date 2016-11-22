@@ -1,6 +1,7 @@
 
 import java.util
 
+import soot.heapshape.HeapShapeAnalysis
 import soot.jimple._
 import soot.options.Options
 import soot.toolkits.graph.{DirectedGraph, ExceptionalUnitGraph}
@@ -14,7 +15,7 @@ import scala.collection.{mutable => m}
 
 
 // refactor into trait later
-class ReachableTypesAnalysis(g: DirectedGraph[SUnit]) extends ForwardFlowAnalysis[SUnit, m.Map[Value, m.Set[SType]]](g) {
+class ReachableTypesAnalysis(heapShapeAnalysis: HeapShapeAnalysis, g: DirectedGraph[SUnit]) extends ForwardFlowAnalysis[SUnit, m.Map[Value, m.Set[SType]]](g) {
   doAnalysis()
 
   override def flowThrough(before: m.Map[Value, m.Set[SType]], n: SUnit, after: m.Map[Value, m.Set[SType]]): Unit = {
@@ -39,15 +40,18 @@ class ReachableTypesAnalysis(g: DirectedGraph[SUnit]) extends ForwardFlowAnalysi
       case _ => m.HashSet(v.getType)
     }
 
+    def updateAfter(newSet: m.Set[SType])(left: Value) : Unit = {
+      val old = after.getOrElse(left, m.Set())
+      after.put(left, old ++ newSet)
+    }
+
     n match {
       case n: DefinitionStmt =>
         val left = n.getLeftOp
-        val right = n.getRightOp
-
-        val rightTypes = possibleTypesOf(right)
-
-        val old = after.getOrElse(left, m.Set())
-        after.put(left, old ++ rightTypes)
+        val rightTypes = possibleTypesOf(n.getRightOp)
+        val updateFunc = updateAfter(rightTypes)
+        updateFunc(left)
+        heapShapeAnalysis.getPredecessors(left).foreach(updateFunc)
 
       case _ =>
     }
@@ -78,7 +82,7 @@ object ReachableTypesExtension {
     jtpPack.add(
       new Transform("jtp.reachableTypesTransform", new BodyTransformer() {
         def internalTransform(body: Body, phase: String, options: util.Map[String, String]): Unit = {
-          val ana = new ReachableTypesAnalysis(new ExceptionalUnitGraph(body))
+          val ana = new ReachableTypesAnalysis(null, new ExceptionalUnitGraph(body))
           System.out.println(body)
           System.out.println(ana.getFlowAfter(body.getUnits.getLast))
         }
