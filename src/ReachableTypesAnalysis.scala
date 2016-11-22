@@ -49,9 +49,8 @@ class ReachableTypesAnalysis(heapShapeAnalysis: HeapShapeAnalysis, g: DirectedGr
       case n: DefinitionStmt =>
         val left = n.getLeftOp
         val rightTypes = possibleTypesOf(n.getRightOp)
-        val updateFunc = updateAfter(rightTypes)
-        updateFunc(left)
-        heapShapeAnalysis.getPredecessors(left).foreach(updateFunc)
+        updateAfter(rightTypes)(left)
+        heapShapeAnalysis.getPredecessors(left).foreach(updateAfter(rightTypes))
 
       case _ =>
     }
