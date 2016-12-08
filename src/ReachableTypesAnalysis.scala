@@ -1,7 +1,8 @@
 
 import java.util
 
-import ReachableTypeUtils.LambdaSet
+import soot.cg.utils.CallGraphUtils
+import soot.cg.utils.CallGraphUtils._
 import soot.heapshape.HeapShapeAnalysis
 import soot.jimple._
 import soot.jimple.toolkits.callgraph.{CallGraph, Edge, EdgePredicate, Filter}
@@ -93,7 +94,7 @@ class ReachableTypesAnalysis(heapShapeAnalysis: HeapShapeAnalysis, anaMap: Reach
 
       case n: InvokeStmt =>
         possibleTypesOf(n.getInvokeExpr)
-        
+
       case _ =>
     }
   }
@@ -113,59 +114,33 @@ class ReachableTypesAnalysis(heapShapeAnalysis: HeapShapeAnalysis, anaMap: Reach
   }
 }
 
-object CallGraphUtils {
-  def removeCycles(cg: CallGraph): Unit = {
-
-    def removeEdges(prev: im.Set[SootMethod])(sm: SootMethod): Unit = {
-      val out = cg.edgesOutOf(sm)
-      out.asScala.foreach { e =>
-        if (!prev.contains(sm)) {
-          removeEdges(prev + e.src())(e.tgt())
-        } else {
-          cg.removeEdge(e)
-        }
-      }
-    }
-
-    cg.sourceMethods().asScala.foreach{ mc =>
-      removeEdges(new im.HashSet())(mc.method())
-    }
-  }
-
-  def sinkMethods(cg: CallGraph): im.Set[SootMethod] = {
-    def dfs(prev: im.Set[SootMethod])(sm: SootMethod): im.Set[SootMethod] = {
-      val out = cg.edgesOutOf(sm).asScala
-      if (out.isEmpty) {
-        prev + sm
-      } else {
-        out.map { e =>
-          dfs(prev)(e.tgt())
-        }.foldRight(im.HashSet[SootMethod]()) { (a, b) => b union a }
-      }
-    }
-
-    cg.sourceMethods().asScala.foldRight(im.HashSet[SootMethod]()){
-      (mc, set) =>
-        set union dfs(im.HashSet[SootMethod]())(mc.method())
-    }
-  }
-}
 
 object ReachableTypesExtension {
   def main(args: Array[String]): Unit = {
     Options.v().set_whole_program(true)
     Options.v().setPhaseOption("cg.spark", "on")
 
-    val jtpPack = PackManager.v().getPack("jtp")
+    val wjtpPack = PackManager.v().getPack("wjtp")
 
-    jtpPack.add(
-      new Transform("jtp.reachableTypesTransform", new SceneTransformer() {
+    wjtpPack.add(
+      new Transform("wjtp.reachableTypesTransform", new SceneTransformer() {
         def internalTransform(phase: String, options: util.Map[String, String]): Unit = {
-          val cg = Scene.v().getCallGraph
-          CallGraphUtils.removeCycles(cg)
+          val cg = Scene.v().getCallGraph.asDirectedGraph
+
+          def methodsToRemove(dcg: DirectedCallGraph) : m.Set[SootMethod] = {
+            val methods = m.Set[SootMethod]()
+            for (node <- dcg.asScala) {
+              if (!Scene.v().getApplicationClasses.contains(node.getDeclaringClass)) {
+                methods += node
+              }
+            }
+            methods
+          }
+
+          methodsToRemove(cg).foreach(cg.removeNode)
 
           val anaMap = m.Map[SootMethod, ReachableTypeUtils.LambdaSet]()
-          val sinks = CallGraphUtils.sinkMethods(cg)
+          val sinks = cg.getTails.asScala
 
           def visitMethod(mc: MethodOrMethodContext): Unit = {
             val sm = mc.method()
@@ -175,9 +150,10 @@ object ReachableTypesExtension {
                 ana.getResultsAfter(sm.getActiveBody.getUnits.getLast)
               }
             }
+            cg.getPredsOf(sm).asScala.foreach(visitMethod)
           }
-
           sinks.foreach(visitMethod)
+          Console.println(anaMap(cg.getHeads.get(0))(MethodArgument(null, Seq(m.Set()))))
         }
       }))
 
