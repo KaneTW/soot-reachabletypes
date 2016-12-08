@@ -1,11 +1,11 @@
 
 import java.util
 
-import soot.cg.utils.CallGraphUtils
 import soot.cg.utils.CallGraphUtils._
+import soot.reachabletypes._
+import soot.reachabletypes.ReachableTypeUtils._
 import soot.heapshape.HeapShapeAnalysis
 import soot.jimple._
-import soot.jimple.toolkits.callgraph.{CallGraph, Edge, EdgePredicate, Filter}
 import soot.options.Options
 import soot.toolkits.graph.{DirectedGraph, ExceptionalUnitGraph}
 import soot.toolkits.scalar.ForwardFlowAnalysis
@@ -15,16 +15,9 @@ import scala.collection.JavaConverters._
 import scala.collection.{immutable => im, mutable => m}
 
 
-case class MethodArgument(thisSet: m.Set[SType], argSet: Seq[m.Set[SType]])
-case class MethodResult(returnSet: m.Set[SType], thisSet: m.Set[SType], argSet: Seq[m.Set[SType]])
-
-object ReachableTypeUtils {
-  type LambdaSet = MethodArgument => MethodResult
-  type AnalysisMap = m.Map[SootMethod, LambdaSet]
-}
 
 // refactor into trait later
-class ReachableTypesAnalysis(heapShapeAnalysis: HeapShapeAnalysis, anaMap: ReachableTypeUtils.AnalysisMap, sootMethod: SootMethod, methodArgs: MethodArgument) extends ForwardFlowAnalysis[SUnit, m.Map[Value, m.Set[SType]]](new ExceptionalUnitGraph(sootMethod.getActiveBody)) {
+class ReachableTypesAnalysis(heapShapeAnalysis: HeapShapeAnalysis, anaMap: AnalysisMap, sootMethod: SootMethod, methodArgs: MethodArgument) extends ForwardFlowAnalysis[SUnit, m.Map[Value, m.Set[SType]]](new ExceptionalUnitGraph(sootMethod.getActiveBody)) {
   doAnalysis()
 
   def getResultsAfter(n: SUnit) = {
@@ -127,26 +120,27 @@ object ReachableTypesExtension {
         def internalTransform(phase: String, options: util.Map[String, String]): Unit = {
           val cg = Scene.v().getCallGraph.asDirectedGraph
 
-          def methodsToRemove(dcg: DirectedCallGraph) : m.Set[SootMethod] = {
-            val methods = m.Set[SootMethod]()
-            for (node <- dcg.asScala) {
-              if (!Scene.v().getApplicationClasses.contains(node.getDeclaringClass)) {
-                methods += node
+          val anaMap = m.Map[SootMethod, LambdaSet]().withDefault{
+            sm =>
+              // default for unanalyzed functions
+              { margs =>
+                val thisType: m.Set[SType] = if (sm.isStatic) m.HashSet() else { m.HashSet(sm.getDeclaringClass.getType) }
+                MethodResult(m.HashSet(sm.getReturnType), thisType, sm.getParameterTypes.asScala.seq.map(m.HashSet(_)))
               }
-            }
-            methods
+
           }
 
-          methodsToRemove(cg).foreach(cg.removeNode)
+          val sinks = cg.getTails.asScala.filter{ sm => Scene.v().getApplicationClasses.contains(sm.getDeclaringClass) }
 
-          val anaMap = m.Map[SootMethod, ReachableTypeUtils.LambdaSet]()
-          val sinks = cg.getTails.asScala
+          class DummyHeapShape extends HeapShapeAnalysis {
+            override def getPredecessors(method: SootMethod, unit: SUnit, ref: Value) = Set()
+          }
 
           def visitMethod(mc: MethodOrMethodContext): Unit = {
             val sm = mc.method()
             if (!anaMap.contains(sm)) {
               anaMap(sm) = { margs =>
-                val ana = new ReachableTypesAnalysis(null, anaMap, sm, margs)
+                val ana = new ReachableTypesAnalysis(new DummyHeapShape(), anaMap, sm, margs)
                 ana.getResultsAfter(sm.getActiveBody.getUnits.getLast)
               }
             }
@@ -160,3 +154,4 @@ object ReachableTypesExtension {
     soot.Main.main(args)
   }
 }
+
